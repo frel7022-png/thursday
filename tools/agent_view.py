@@ -28,9 +28,11 @@ from pathlib import Path
 
 import pandas as pd
 
-NEW1 = Path(r"C:\Users\frel\Desktop\new1")
 HERE = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(NEW1))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from new1_locator import find_new1  # noqa: E402
+
+NEW1 = find_new1()
 import portfolio_core as core  # noqa: E402
 
 CAP = 0.05          # 종목당 상한 = 총자산의 5% (대표 결정, 2026-10-15)
@@ -164,6 +166,43 @@ def _index_frames(b: Book):
     import live_check
     s = live_check.live_snapshot(holdings=b.h if not b.h.empty else None, quotes=b.quotes or None)
     return s
+
+
+def take_numbers(b: Book) -> dict:
+    """오늘 성적 숫자 — cmd_take와 모니터링 앱이 같이 쓴다."""
+    tx = b.tx
+    prev_tx = tx[tx["날짜"] < b.today]
+    hp, sp, _ = core.rebuild_portfolio_from_transactions(prev_tx, b.initial, b.fee)
+    prev_val = 0.0
+    for _, r in hp.iterrows():
+        code = r["종목코드"] or b.n2c.get(r["종목명"], "")
+        q = b.quotes.get(code) or core.fetch_quotes([code])[0].get(code) or {}
+        px, chg = q.get("price"), q.get("change_pct") or 0
+        if px:
+            prev_val += float(r["수량"]) * px / (1 + chg / 100)
+    prev_total = prev_val + float(sp["cash"])
+    t = tx[tx["날짜"] == b.today]
+    out = {"total": b.total, "initial": b.initial, "cash": b.cash, "stock_val": b.stock_val, "n": len(b.h),
+           "day_won": b.total - prev_total, "day_pct": (b.total / prev_total - 1) * 100 if prev_total else 0.0,
+           "realized_today": float(pd.to_numeric(t.loc[t["구분"] == "매도", "실현손익"], errors="coerce").sum()),
+           "stock_day": None, "ex_day": None, "main_day": None, "basis": "", "start": None, "bench_cum": None}
+    if not b.h.empty and b.stock_val:
+        prev_sv = float((b.h["평가금액"] / (1 + b.h["등락률"] / 100)).sum())
+        out["stock_day"] = (b.stock_val / prev_sv - 1) * 100 if prev_sv else None
+    try:
+        s = _index_frames(b)
+        out.update(ex_day=s["ex"][1] * 100, main_day=s["main"][1] * 100, basis=s["basis"])
+        if not tx.empty:
+            start = tx["날짜"].min()
+            ex = core.synthetic_kospi_ex_bigcap(s["idx"], s["bigdf"])
+            base = ex[ex["날짜"] < start]
+            if not base.empty:
+                k0, q0 = float(base["KOSPI"].iloc[-1]), float(base["KOSDAQ"].iloc[-1])
+                k1, q1 = float(ex["KOSPI"].iloc[-1]), float(ex["KOSDAQ"].iloc[-1])
+                out.update(start=start, bench_cum=(s["wk"] * (k1 / k0 - 1) + (1 - s["wk"]) * (q1 / q0 - 1)) * 100)
+    except Exception as e:  # 지수 조회 실패해도 계좌 숫자는 보여준다
+        out["index_error"] = str(e)
+    return out
 
 
 def cmd_take(b: Book, header=True):

@@ -6,3 +6,6 @@
 __pycache__/
 *.pyc
 .venv/
+
+# Streamlit Cloud에서 받아 둔 new1(orchestra) 사본
+.new1/
