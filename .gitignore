@@ -1,0 +1,8 @@
+# 비밀값
+.env
+.streamlit/secrets.toml
+
+# 파이썬 부산물
+__pycache__/
+*.pyc
+.venv/
