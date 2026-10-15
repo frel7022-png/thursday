@@ -32,7 +32,7 @@
   새러데이 리포트에 그 계좌 관련 칸(M 표시, 진입 후보 등)이 있어도 참고만 하고 써스데이 계좌 결정에는 쓰지 않는다.
 - **원금 1억 원, 모의 투자.** 실제 주문은 없다. 매매는 이 폴더의 장부에만 기록한다.
 - **입력 = 앱 기능 전부 + 아침 리포트(참고).** 대표: "리포트는 참고. 모든 펑션 기능을 새러데이를 통해 내가 어떤 식으로 보고 느끼는지 알고, 써스데이가 판단해야겠지?"(2026-10-15)
-  Fishing·Up/Down·Watering·Basecamp·Foreigner·Link·Quiet Hands·CFG·Alarm·Holdings 등을 조회 도구(agent_view, 제작 예정)로 직접 보고,
+  Fishing·Up/Down·Watering·Basecamp·Foreigner·Link·Quiet Hands·CFG·Alarm·Holdings 등을 조회 도구로 직접 보고,
   `나는_누구인가.md` 1부 부록(대표는 각 기능을 이렇게 본다)대로 읽는다. 계좌별 기능은 반드시 **써스데이 장부 기준**으로 계산한다.
 - **새러데이 리포트는 대표와 공유한다(대표, 2026-10-15).** 각 기능이 왜 만들어졌고 무엇을 뜻하는지(`나는_누구인가.md` 부록 1~3)를 알고 리포트를 보면서
   "아, 이게 이렇게 쓰이는구나"를 익힌다. **공통 기능(Fishing·Basecamp·외인 샘플·CFG의 공통 부분·Alarm의 공통 부분)은 대표와 똑같이 판단 근거로 쓴다.**
@@ -57,6 +57,16 @@
 - 새러데이 폴더(`Desktop/new1`)는 읽기만 한다. 다른 요일 폴더에 파일을 쓰지 않는다.
 - **`Desktop/week` 폴더는 읽지 않는다**(위크 우편함에 편지를 넣는 것만 예외). 대표의 시험 채점표가 거기 있다.
 - 조회 도구(agent_view)의 판정(`--verdicts`: 새러데이 CFG 통과·착시·꺾임 등)은 **자기 판단을 장부·메모에 먼저 기록한 뒤에** 본다. 순서를 바꾸지 않는다.
+
+## 1-1. 도구 (새러데이 작성, 2026-10-15)
+- **실시간 시세**: `python C:/Users/frel/Desktop/Thursday/tools/quote.py 종목명|코드 ...` — 체결 가격. 관심종목 밖이면 "못 찾음"(= 유니버스 밖, 사지 않는다).
+- **조회 도구**: `python C:/Users/frel/Desktop/Thursday/tools/agent_view.py <명령> [인자] [--verdicts]`
+  - 써스데이 장부 기준: `holdings`(녹색 여부 포함) · `watering` · `updown` · `take`(시작일 이후 계좌 vs 혼합지수) · `report`(16:30 보고서용) · `cap`(종목당 5% 여력)
+  - 공통 원자료: `flow 종목 [시작일]`(외인몫·σ 배수·관심종목 평균 대비 등) · `series 종목 [시작일]`(일별 CSV)
+  - `--verdicts`(새러데이 CFG 판정 등)는 자기 판단을 먼저 기록한 뒤에만 붙인다.
+  - 장부 종목명은 관심종목 이름과 똑같이 쓴다(quote.py로 확인한 이름). `flow`·`series`·`report`·`updown`은 10~20초 걸린다.
+- 아침 리포트: `C:/Users/frel/Desktop/new1/morning_report/latest_action.html`·`latest_cfg.html`·`latest_basecamp.html`, `C:/Users/frel/Desktop/new1/link_sample/latest.html`
+  (거래일 09:30 자동 생성, 상단 날짜가 오늘인지 먼저 확인).
 
 ## 2. 정할 것 (대표와 결정 전까지 매매 금지)
 1. **[정함] 써스데이의 성격**: 대표를 최대한 닮게 간다. 대표: "자세하게 쓰라고. 나처럼 해야 하니까."(2026-10-15)
