@@ -61,6 +61,10 @@ def main() -> int:
             i += 1
     q, errs = core.fetch_quotes([c for _, c in pairs])
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 네이버 실시간 시세")
+    from agent_view import trading_day  # 같은 폴더. 휴장·개장 전이면 가격·등락률은 마지막 거래일 종가 하루치
+    day, closed, basis = trading_day()
+    if closed:
+        print(f"※ {basis} — 아래 가격은 {day} 종가, 등락률은 {day} 하루치(체결가로 쓰지 말 것)")
     for name, code in pairs:
         r = q.get(code)
         if not r or r.get("price") is None:

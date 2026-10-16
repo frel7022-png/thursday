@@ -24,7 +24,7 @@
 """
 import math
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -68,13 +68,31 @@ def load_ledger(path: Path):
     return tx[core.TX_COLUMNS], float(st["최초자본"]), float(st.get("수수료율", 0.002))
 
 
+def trading_day(now=None):
+    """(기준 거래일, 휴장·개장 전 여부, 기준 문구) — new1 live_check와 같은 판정(2026-10-16 대표 지시로 이식).
+    오늘 장이 안 열렸으면(주말·공휴일·평일 개장 전) "오늘"은 달력 날짜가 아니라 마지막 거래일이다.
+    그날 시세 API의 등락률은 마지막 거래일 하루치라, 달력 날짜로 "어제 대비"를 재면 다른 날을 섞어 비교하게 된다.
+    판정 실패(None)면 장이 열린 것으로 본다."""
+    import live_check
+    now = now or datetime.now(core.KST)
+    cal = now.strftime("%Y-%m-%d")
+    closed = core.market_traded_on(cal) is False
+    day = cal
+    if closed:
+        start = (now - timedelta(days=14)).strftime("%Y-%m-%d")
+        ds = [r["날짜"] for r in core.fetch_daily_price_history("KOSPI", start, cal) if r["날짜"] <= cal]
+        day = max(ds) if ds else cal
+    return day, closed, live_check.basis_label(now, cal, day, closed)
+
+
 class Book:
     """써스데이 장부를 재생한 결과 + 실시간 시세."""
 
     def __init__(self, ledger: Path):
         self.tx, self.initial, self.fee = load_ledger(ledger)
         self.now = datetime.now(core.KST)
-        self.today = self.now.strftime("%Y-%m-%d")
+        # today = 기준 거래일(휴장·개장 전이면 마지막 거래일). "오늘 매매·어제 대비"는 전부 이 날 기준
+        self.today, self.closed, self.basis = trading_day(self.now)
         self.n2c = name_to_code()
         h, st, self.tx = core.rebuild_portfolio_from_transactions(self.tx, self.initial, self.fee)
         h = h.copy()
@@ -101,7 +119,7 @@ class Book:
 
     def header(self):
         last = self.tx["날짜"].max() if not self.tx.empty else "거래 없음"
-        _out(f"[써스데이 장부] {self.now:%Y-%m-%d %H:%M} 실시간 시세 · 장부 마지막 거래 {last} · 원금 {self.initial:,.0f}원")
+        _out(f"[써스데이 장부] {self.now:%Y-%m-%d %H:%M} · 기준일 {self.today} ({self.basis}) · 장부 마지막 거래 {last} · 원금 {self.initial:,.0f}원")
 
 
 # ------------------------------------------------------------------ 써스데이 장부 기준
@@ -186,7 +204,8 @@ def take_numbers(b: Book) -> dict:
     out = {"total": b.total, "initial": b.initial, "cash": b.cash, "stock_val": b.stock_val, "n": len(b.h),
            "day_won": b.total - prev_total, "day_pct": (b.total / prev_total - 1) * 100 if prev_total else 0.0,
            "realized_today": float(pd.to_numeric(t.loc[t["구분"] == "매도", "실현손익"], errors="coerce").sum()),
-           "stock_day": None, "ex_day": None, "main_day": None, "basis": "", "start": None, "bench_cum": None}
+           "stock_day": None, "ex_day": None, "main_day": None, "basis": b.basis, "today": b.today, "closed": b.closed,
+           "start": None, "bench_cum": None}
     if not b.h.empty and b.stock_val:
         prev_sv = float((b.h["평가금액"] / (1 + b.h["등락률"] / 100)).sum())
         out["stock_day"] = (b.stock_val / prev_sv - 1) * 100 if prev_sv else None

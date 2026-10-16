@@ -92,7 +92,7 @@ st.markdown(
     f'<div>어제 대비<b style="color:{color(take["day_won"])}">{signed(take["day_won"], won=True)} ({signed(take["day_pct"])})</b></div>'
     f'<div>예수금<b>{take["cash"]:,.0f}원 ({take["cash"] / take["total"] * 100:.1f}%)</b></div>'
     f'<div>총평가<b>{take["stock_val"]:,.0f}원</b></div>'
-    f'<div>오늘 실현손익<b style="color:{color(take["realized_today"])}">{signed(take["realized_today"], won=True)}</b></div>'
+    f'<div>{(take["today"][5:] + " ") if take.get("closed") else "오늘 "}실현손익<b style="color:{color(take["realized_today"])}">{signed(take["realized_today"], won=True)}</b></div>'
     f'<div>보유<b>{take["n"]}종목</b></div>'
     f'</div></div>', unsafe_allow_html=True)
 
@@ -106,7 +106,7 @@ if take.get("start") and take.get("bench_cum") is not None:
                 f' · 혼합지수 <b style="color:{color(take["bench_cum"])}">{signed(take["bench_cum"])}</b></div>')
 st.markdown(
     f'<div class="tw-box tw-take"><div class="tw-label" style="font-weight:600;color:#191b21">Today\'s Take</div>'
-    f'<div>혼합지수(삼성·하이닉스 제외) <b style="color:{color(ex_day)}">{signed(ex_day)}</b></div>'
+    f'<div>{("[" + take["basis"] + "] ") if take.get("closed") else ""}혼합지수(삼성·하이닉스 제외) <b style="color:{color(ex_day)}">{signed(ex_day)}</b></div>'
     f'<div>내 지수 <b style="color:{color(my_day)}">{signed(my_day)}</b></div>'
     f'<div>혼합지수 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>{cum_line}</div>',
     unsafe_allow_html=True)
