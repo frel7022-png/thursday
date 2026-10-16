@@ -12,6 +12,7 @@
 [공통 원자료]
   flow 종목 [시작일]   주가·외인·기관 원숫자(구간 수익률, 유니버스 평균, 보유율 %p, 하루 변화 σ 배수, 외인몫·기관몫, 순매수일)
   series 종목 [시작일] 일별 원시 시계열 CSV(날짜·종가·거래량·외인순매수·기관순매수·외인보유율)
+  screen [시작일]      관심종목 전부를 flow와 같은 원숫자로 한 번에 CSV(주가 수익률 낮은 순). 후보 풀은 써스데이가 직접 거른다
 
 원칙
 - 기본 출력은 원숫자만. 판정(새러데이 CFG 문턱 통과, 착시, 꺾임)은 --verdicts를 붙여야 나온다.
@@ -304,31 +305,33 @@ def _window(df, code, start):
     return g, g[g["날짜"] >= start] if start else g
 
 
-def cmd_flow(data, n2c, arg, start, verdicts):
+def _uni_avg(ph, live, start, before):
+    """같은 구간 관심종목 평균 수익률(%)과 종목 수. before=True면 시작일 직전 종가가 기준."""
+    base = ph[ph["날짜"] < start].sort_values("날짜").groupby("종목코드").last()["종가"] if before else \
+        ph[ph["날짜"] >= start].sort_values("날짜").groupby("종목코드").first()["종가"]
+    uni = [(live[c] / float(v) - 1) * 100 for c, v in base.items() if live.get(c) and float(v) > 0]
+    return (sum(uni) / len(uni) if uni else float("nan")), len(uni)
+
+
+def flow_numbers(data, code, start, uni=None):
+    """flow·screen 공용 원숫자. 주가 기록이 없으면 None, 외인 기록이 없으면 외인 칸이 빠진 dict."""
     ph, fh, live = data["ph"], data["fh"], data["live"]
-    code = _resolve(arg, n2c, ph)
-    if not code:
-        _out(f"{arg}: 관심종목에서 못 찾음")
-        return
     pg, pw = _window(ph, code, start)
     fg, fw = _window(fh, code, start)
-    if pg.empty:
-        _out(f"{arg}: 주가 기록 없음")
-        return
-    start = start or pg["날짜"].iloc[0]
-    name = pg["종목명"].iloc[-1]
+    if pg.empty or pw.empty:
+        return None
+    if not start:  # 시작일을 안 주면 주가 첫 기록일. 외인 구간도 같은 날부터 잘라 같은 기간으로 맞춘다
+        start = pg["날짜"].iloc[0]
+        fw = fg[fg["날짜"] >= start]
     prev_p = pg[pg["날짜"] < start]
     p0 = float(prev_p["종가"].iloc[-1]) if not prev_p.empty else float(pw["종가"].iloc[0])
     p_now = live.get(code) or float(pg["종가"].iloc[-1])
-    # 같은 구간 유니버스 평균
-    base = ph[ph["날짜"] < start].sort_values("날짜").groupby("종목코드").last()["종가"] if not prev_p.empty else \
-        ph[ph["날짜"] >= start].sort_values("날짜").groupby("종목코드").first()["종가"]
-    uni = [(live[c] / float(v) - 1) * 100 for c, v in base.items() if live.get(c) and float(v) > 0]
-    _out(f"[{name}({code})] 구간 {start} ~ 지금 · 주가 {datetime.now(core.KST):%m-%d %H:%M} 실시간 · 외인 DB 최신일 {fg['날짜'].max() if not fg.empty else '-'}")
-    _out(f"주가 {p0:,.0f} → {p_now:,.0f} ({pct((p_now / p0 - 1) * 100)}) · 같은 구간 관심종목 {len(uni)}개 평균 {pct(sum(uni) / len(uni)) if uni else '-'}")
-    if fg.empty or fw.empty:
-        _out("외인 기록 없음")
-        return
+    if uni is None:
+        uni = _uni_avg(ph, live, start, not prev_p.empty)
+    r = dict(code=code, name=pg["종목명"].iloc[-1], start=start, p0=p0, p_now=p_now, ret=(p_now / p0 - 1) * 100,
+             uni_avg=uni[0], uni_n=uni[1], f_last=fg["날짜"].max() if not fg.empty else "-", has_f=not (fg.empty or fw.empty))
+    if not r["has_f"]:
+        return r
     prev_f = fg[fg["날짜"] < start]
     f0 = float(prev_f["외국인보유율"].iloc[-1]) if not prev_f.empty else float(fw["외국인보유율"].iloc[0])
     f1 = float(fg["외국인보유율"].iloc[-1])
@@ -339,9 +342,6 @@ def cmd_flow(data, n2c, arg, start, verdicts):
     z = (f1 - f0) / (sd * math.sqrt(n)) if sd and sd == sd and sd > 0 else float("nan")
     fhi = float(fw.loc[hi_i, "외국인보유율"])
     give = (fhi - f1) / (fhi - f0) * 100 if fhi > f0 else float("nan")
-    _out(f"외인 보유율 {f0:.2f}% → {f1:.2f}% ({f1 - f0:+.2f}%p) · 상대(참고) {pct((f1 / f0 - 1) * 100 if f0 else float('nan'), 1)}")
-    _out(f"구간 고점 {fhi:.2f}%({fw.loc[hi_i, '날짜'][5:]}) · 저점 {float(fw.loc[lo_i, '외국인보유율']):.2f}%({fw.loc[lo_i, '날짜'][5:]}) · 고점 대비 반납 {f'{give:.0f}%' if give == give else '-'}")
-    _out(f"하루 변화 표준편차 {sd:.3f}%p (전 기간) · 구간 {n}일 · 증가 / (σ×√n) = {z:.2f}배" if z == z else f"하루 변화 표준편차 계산 불가 · 구간 {n}일")
     w = fw.merge(pg[["날짜", "종가"]], on="날짜", how="left")
     fn = pd.to_numeric(w["외국인순매수"], errors="coerce").fillna(0)
     inn = pd.to_numeric(w["기관순매수"], errors="coerce").fillna(0)
@@ -352,18 +352,84 @@ def cmd_flow(data, n2c, arg, start, verdicts):
     for v in fn:
         streak = streak + 1 if v > 0 else 0
         best = max(best, streak)
-    _out(f"외인 순매수 {fn.sum():+,.0f}주 (약 {(fn * px).sum():+,.0f}원) · 기관 순매수 {inn.sum():+,.0f}주 (약 {(inn * px).sum():+,.0f}원) · 거래량 합 {vs:,.0f}주")
-    _out(f"외인몫 {pct(fn.sum() / vs * 100 if vs else float('nan'), 1)} · 기관몫 {pct(inn.sum() / vs * 100 if vs else float('nan'), 1)} "
-         f"(구간 순매수 합 ÷ 거래량 합) · 외인 순매수일 {int((fn > 0).sum())}/{n}일 · 최장 연속 {best}일")
+    r.update(f0=f0, f1=f1, dp=f1 - f0, rel=(f1 / f0 - 1) * 100 if f0 else float("nan"),
+             fhi=fhi, fhi_d=fw.loc[hi_i, "날짜"], flo=float(fw.loc[lo_i, "외국인보유율"]), flo_d=fw.loc[lo_i, "날짜"],
+             give=give, sd=sd, n=n, z=z, fn_sh=float(fn.sum()), fn_won=float((fn * px).sum()),
+             in_sh=float(inn.sum()), in_won=float((inn * px).sum()), vol=vs,
+             f_share=fn.sum() / vs * 100 if vs else float("nan"), i_share=inn.sum() / vs * 100 if vs else float("nan"),
+             f_days=int((fn > 0).sum()), best=best,
+             peak_age=len(fg[fg["날짜"] > fw.loc[hi_i, "날짜"]]),
+             last5=float(fg["외국인보유율"].astype(float).tail(6).diff().dropna().sum()))
+    return r
+
+
+def _verdict(r):
+    cfg = r["dp"] >= 0.3 or (r["f0"] >= 3 and (r["rel"] if r["rel"] == r["rel"] else 0) >= 5)
+    illusion = r["give"] == r["give"] and r["give"] >= 30
+    bent = r["peak_age"] >= 5 and r["last5"] < 0
+    return cfg, illusion, bent
+
+
+def cmd_flow(data, n2c, arg, start, verdicts):
+    code = _resolve(arg, n2c, data["ph"])
+    if not code:
+        _out(f"{arg}: 관심종목에서 못 찾음")
+        return
+    r = flow_numbers(data, code, start)
+    if r is None:
+        _out(f"{arg}: 주가 기록 없음")
+        return
+    _out(f"[{r['name']}({code})] 구간 {r['start']} ~ 지금 · 주가 {datetime.now(core.KST):%m-%d %H:%M} 실시간 · 외인 DB 최신일 {r['f_last']}")
+    _out(f"주가 {r['p0']:,.0f} → {r['p_now']:,.0f} ({pct(r['ret'])}) · 같은 구간 관심종목 {r['uni_n']}개 평균 {pct(r['uni_avg']) if r['uni_n'] else '-'}")
+    if not r["has_f"]:
+        _out("외인 기록 없음")
+        return
+    _out(f"외인 보유율 {r['f0']:.2f}% → {r['f1']:.2f}% ({r['dp']:+.2f}%p) · 상대(참고) {pct(r['rel'], 1)}")
+    give = f"{r['give']:.0f}%" if r["give"] == r["give"] else "-"
+    _out(f"구간 고점 {r['fhi']:.2f}%({r['fhi_d'][5:]}) · 저점 {r['flo']:.2f}%({r['flo_d'][5:]}) · 고점 대비 반납 {give}")
+    _out(f"하루 변화 표준편차 {r['sd']:.3f}%p (전 기간) · 구간 {r['n']}일 · 증가 / (σ×√n) = {r['z']:.2f}배" if r["z"] == r["z"] else f"하루 변화 표준편차 계산 불가 · 구간 {r['n']}일")
+    _out(f"외인 순매수 {r['fn_sh']:+,.0f}주 (약 {r['fn_won']:+,.0f}원) · 기관 순매수 {r['in_sh']:+,.0f}주 (약 {r['in_won']:+,.0f}원) · 거래량 합 {r['vol']:,.0f}주")
+    _out(f"외인몫 {pct(r['f_share'], 1)} · 기관몫 {pct(r['i_share'], 1)} "
+         f"(구간 순매수 합 ÷ 거래량 합) · 외인 순매수일 {r['f_days']}/{r['n']}일 · 최장 연속 {r['best']}일")
     if verdicts:
-        d = f1 - f0
-        rel = (f1 / f0 - 1) * 100 if f0 else 0
-        cfg = d >= 0.3 or (f0 >= 3 and rel >= 5)
-        last5 = fg["외국인보유율"].astype(float).tail(6).diff().dropna()
-        peak_age = len(fg[fg["날짜"] > fw.loc[hi_i, "날짜"]])
+        cfg, illusion, bent = _verdict(r)
         _out(f"[판정] 새러데이 CFG 외인 문턱(+0.3%p 또는 기준 3%↑·상대 +5%↑): {'통과' if cfg else '미달'} · "
-             f"착시(고점 대비 30%↑ 반납): {'예' if give == give and give >= 30 else '아니오'} · "
-             f"꺾임(고점 5거래일 경과 + 최근 5일 감소): {'예' if peak_age >= 5 and last5.sum() < 0 else '아니오'}")
+             f"착시(고점 대비 30%↑ 반납): {'예' if illusion else '아니오'} · "
+             f"꺾임(고점 5거래일 경과 + 최근 5일 감소): {'예' if bent else '아니오'}")
+
+
+def cmd_screen(data, start, verdicts):
+    """관심종목 전부를 flow와 같은 원숫자로 한 번에 잰다. CSV로 출력(주가 수익률 낮은 순). 거르는 건 써스데이 몫."""
+    ph, live = data["ph"], data["live"]
+    codes = ph["종목코드"].dropna().unique().tolist()
+    uni_cache = {}
+    rows = []
+    for code in codes:
+        pg = ph[ph["종목코드"] == code]
+        s = start or pg["날짜"].min()
+        before = not pg[pg["날짜"] < s].empty
+        key = (s, before)
+        if key not in uni_cache:
+            uni_cache[key] = _uni_avg(ph, live, s, before)
+        r = flow_numbers(data, code, start, uni_cache[key])
+        if r is None:
+            continue
+        row = {"종목명": r["name"], "종목코드": code, "구간시작": r["start"], "시작가": round(r["p0"]), "지금": round(r["p_now"]),
+               "주가%": round(r["ret"], 2), "유니버스평균%": round(r["uni_avg"], 2), "유니버스대비%p": round(r["ret"] - r["uni_avg"], 2)}
+        if r["has_f"]:
+            row.update({"외인시작%": round(r["f0"], 2), "외인지금%": round(r["f1"], 2), "외인%p": round(r["dp"], 2),
+                        "σ배수": round(r["z"], 2) if r["z"] == r["z"] else "", "고점반납%": round(r["give"]) if r["give"] == r["give"] else "",
+                        "외인몫%": round(r["f_share"], 1) if r["f_share"] == r["f_share"] else "",
+                        "기관몫%": round(r["i_share"], 1) if r["i_share"] == r["i_share"] else "",
+                        "외인순매수원": round(r["fn_won"]), "순매수일": r["f_days"], "구간일수": r["n"], "최장연속": r["best"],
+                        "외인최신일": r["f_last"]})
+            if verdicts:
+                cfg, illusion, bent = _verdict(r)
+                row.update({"CFG문턱": "통과" if cfg else "미달", "착시": "예" if illusion else "", "꺾임": "예" if bent else ""})
+        rows.append(row)
+    df = pd.DataFrame(rows).sort_values("주가%")
+    _out(f"# screen · 관심종목 {len(df)}개 · 주가 {datetime.now(core.KST):%Y-%m-%d %H:%M} 실시간 · 구간 시작 = {start or '종목별 기준일(DB 첫 기록)'}")
+    _out(df.to_csv(index=False).rstrip())
 
 
 def cmd_series(data, n2c, arg, start):
@@ -401,11 +467,15 @@ def main() -> int:
         _out(__doc__)
         return 1
     cmd, rest = args[0], args[1:]
-    need_data = cmd in ("flow", "series", "report", "updown")
+    need_data = cmd in ("flow", "series", "report", "updown", "screen")
     data = None
     if need_data:
         import daily_link_report as link
         data = link.load_data()
+    if cmd == "screen":
+        is_date = lambda s: len(s) == 10 and s[4] == "-" and s[7] == "-"
+        cmd_screen(data, next((a for a in rest if is_date(a)), None), verdicts)
+        return 0
     if cmd in ("flow", "series"):
         if not rest:
             _out("종목명 또는 코드를 줘")
