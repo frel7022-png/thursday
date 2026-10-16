@@ -2,6 +2,7 @@
 
     python C:/Users/frel/Desktop/Thursday/tools/quote.py 종목명 [종목명 ...]
     python C:/Users/frel/Desktop/Thursday/tools/quote.py 005740 214450
+    python C:/Users/frel/Desktop/Thursday/tools/quote.py JYP Ent. 파마리서치   (공백 든 이름도 따옴표 없이 됨)
 
 종목명 또는 6자리 종목코드를 받아 지금 가격·전일 대비·누적 거래량을 출력한다.
 계산·조회는 new1의 portfolio_core.fetch_quotes()를 import해서 쓴다(로직 복제 없음). 파일을 쓰지 않는다.
@@ -41,13 +42,23 @@ def main() -> int:
     n2c = name_to_code()
     c2n = {v: k for k, v in n2c.items()}
     pairs = []
-    for a in args:
+    i = 0
+    while i < len(args):
+        a = args[i]
         if len(a) == 6 and a[:5].isdigit():
             pairs.append((c2n.get(a, a), a))
-        elif a in n2c:
-            pairs.append((a, n2c[a]))
+            i += 1
+            continue
+        # 공백이 들어간 종목명("JYP Ent.")은 셸이 인자를 쪼갠다 — 이어 붙여 가장 긴 이름부터 대조
+        for j in range(len(args), i, -1):
+            cand = " ".join(args[i:j])
+            if cand in n2c:
+                pairs.append((cand, n2c[cand]))
+                i = j
+                break
         else:
             print(f"{a}: 관심종목에서 코드를 못 찾음")
+            i += 1
     q, errs = core.fetch_quotes([c for _, c in pairs])
     print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 네이버 실시간 시세")
     for name, code in pairs:

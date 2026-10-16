@@ -411,8 +411,11 @@ def main() -> int:
             _out("종목명 또는 코드를 줘")
             return 1
         n2c = name_to_code()
-        start = rest[1] if len(rest) > 1 else None
-        (cmd_flow(data, n2c, rest[0], start, verdicts) if cmd == "flow" else cmd_series(data, n2c, rest[0], start))
+        # 공백 든 종목명("JYP Ent.")은 셸이 쪼갠다 — 날짜(YYYY-MM-DD)가 아닌 인자는 이어 붙여 이름으로 본다
+        is_date = lambda s: len(s) == 10 and s[4] == "-" and s[7] == "-"
+        start = next((a for a in rest if is_date(a)), None)
+        target = " ".join(a for a in rest if not is_date(a))
+        (cmd_flow(data, n2c, target, start, verdicts) if cmd == "flow" else cmd_series(data, n2c, target, start))
         return 0
     b = Book(ledger)
     if cmd == "holdings":
