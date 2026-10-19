@@ -70,10 +70,14 @@ def main() -> int:
         if len(p) < 60:
             continue
         r = p.pct_change().dropna()
-        sd = float(r.tail(250).std())
+        sd_raw = float(r.tail(250).std())
+        # 평소 출렁임은 중앙값 기반(MAD×1.4826)으로 잰다. 하루 −25% 같은 사건 하루가 '평소'를 부풀리지 않게
+        rt = r.tail(250)
+        sd = float((rt - rt.median()).abs().median() * 1.4826) or sd_raw
         v = vol[c].dropna()
         row = {"종목명": names[c], "종목코드": c, "섹터": sector.get(names[c], ""), "표본일수": len(p),
-               "마지막일": p.index[-1].strftime("%Y-%m-%d"), "지금": p.iloc[-1], "일σ%": round(sd * 100, 2)}
+               "마지막일": p.index[-1].strftime("%Y-%m-%d"), "지금": p.iloc[-1], "일σ%": round(sd * 100, 2),
+               "일σ표준%": round(sd_raw * 100, 2)}
         fs = float_sh.get(c)
         row["회전%"] = round(float(v.tail(60).median()) / fs * 100, 3) if fs and fs == fs and fs > 0 else np.nan
         u = uni1.reindex(r.index).tail(250)
@@ -91,6 +95,25 @@ def main() -> int:
             row[f"초과{n}%p"] = round((now - float(ur.mean())) * 100, 2)
             peers = [x for x in close.columns if sector.get(names.get(x, ""), "") == row["섹터"] and x != c]
             row[f"섹터{n}%p"] = round((now - float(ur[peers].mean())) * 100, 2) if row["섹터"] and peers else np.nan
+            if n >= 5:
+                # 경로: 그 n일 하락이 하루 사건인가, 꾸준히 흘러내린 것인가
+                win = r.tail(n)
+                worst = float(win.min())
+                row[f"최악일{n}%"] = round(worst * 100, 2)
+                row[f"최악일비중{n}"] = round(math.log1p(worst) / math.log1p(now), 2) if now < 0 and worst < 0 else np.nan
+                row[f"하락일{n}"] = int((win < 0).sum())
+                rest = (1 + now) / (1 + worst) - 1 if worst < 0 else now
+                row[f"최악일빼고{n}%"] = round(rest * 100, 2)
+        # 최근 20일 안 가장 큰 하락일(사건일)과 그 뒤 흐름
+        w20 = r.tail(20)
+        if len(w20) == 20:
+            ev = w20.idxmin()
+            row["사건일"] = ev.strftime("%Y-%m-%d")
+            row["사건일%"] = round(float(w20.min()) * 100, 2)
+            row["사건배"] = round(float(w20.min()) / sd, 1) if sd > 0 else np.nan
+            after = p[p.index >= ev]
+            row["사건후%"] = round(float(after.iloc[-1] / after.iloc[0] - 1) * 100, 2)
+            row["사건후일수"] = len(after) - 1
         # 과거 비슷한 자리: 자기 20일 수익률 하위 10% 뒤 20거래일
         r20 = (p / p.shift(20) - 1)
         f20 = (p.shift(-20) / p - 1)
