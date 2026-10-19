@@ -111,6 +111,10 @@ def main() -> int:
             row["사건일"] = ev.strftime("%Y-%m-%d")
             row["사건일%"] = round(float(w20.min()) * 100, 2)
             row["사건배"] = round(float(w20.min()) / sd, 1) if sd > 0 else np.nan
+            # 그날 시장(유니버스 평균)과 비교: 시장 전체의 날인가, 이 종목만의 날인가
+            um = float(uni1.get(ev, np.nan))
+            row["사건일시장%"] = round(um * 100, 2)
+            row["사건초과%p"] = round((float(w20.min()) - um) * 100, 2)
             after = p[p.index >= ev]
             row["사건후%"] = round(float(after.iloc[-1] / after.iloc[0] - 1) * 100, 2)
             row["사건후일수"] = len(after) - 1
