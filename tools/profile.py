@@ -9,12 +9,13 @@
       new1/stock_sector_cache.csv(대표 섹터). 거래량 0 행(거래정지일)은 뺀다. 마지막 행이 오늘 장중이면 그 값이 '지금'이다.
 
 출력 열(종목마다 한 줄)
-- 성격: 일σ%(최근 250일 하루 수익률 표준편차) · 회전%(최근 60일 거래량 중간값 ÷ 유동주식수) · 베타(유니버스 동일가중 대비)
+- 성격: 일σ%(최근 60일 하루 수익률, 중앙값 기반) · 일σ250%(같은 방식 250일, 국면 오염 비교용) · 회전%(최근 60일 거래량 중간값 ÷ 유동주식수) · 베타(유니버스 동일가중 대비)
         · 표본일수
 - 지금, 여러 기간(n = 1·5·20·60·120거래일):
   · r{n}%      : n일 수익률
   · z{n}       : r{n} ÷ (일σ × √n). 그 종목 평소 변동 대비 몇 배 움직였나
-  · 분위{n}    : 자기 2년 n일 수익률 분포에서 지금의 위치(0 = 2년 중 가장 많이 빠진 n일)
+  · 분위{n}    : 자기 2년 n일 수익률 분포에서 지금의 위치(0 = 2년 중 가장 많이 빠진 n일). 국면이 섞여 있어 비교용
+  · 초과분위{n}: 유니버스 평균을 뺀 n일 수익률의 자기 2년 분위. 시장 국면을 덜어 낸 값
   · 초과{n}%p  : r{n} − 같은 n일 유니버스 평균. 섹터{n}%p: r{n} − 같은 섹터 평균
 - 과거 비슷한 자리: 자기 20일 수익률이 하위 10%였던 날들 뒤 20거래일 수익률 중간값(후20%)과 그날 수(후20n),
                    같은 종목 아무 날 뒤 20거래일 중간값(평소20%). 이 종목이 많이 빠진 뒤 대체로 어땠나
@@ -33,6 +34,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent.parent
 NS = (1, 5, 20, 60, 120)
 WS = (10, 20, 40)
+SD_WIN = 60  # '평소'를 재는 창(거래일). 국면이 바뀐 구간을 섞지 않으려고 최근만 쓴다(기억/셀/국면_오염.md)
 
 
 def load():
@@ -71,13 +73,16 @@ def main() -> int:
             continue
         r = p.pct_change().dropna()
         sd_raw = float(r.tail(250).std())
-        # 평소 출렁임은 중앙값 기반(MAD×1.4826)으로 잰다. 하루 −25% 같은 사건 하루가 '평소'를 부풀리지 않게
-        rt = r.tail(250)
+        # 평소 출렁임은 중앙값 기반(MAD×1.4826)으로 잰다. 하루 −25% 같은 사건 하루가 '평소'를 부풀리지 않게.
+        # 창은 최근 SD_WIN일(지금 국면). 250일은 2026-01~08 격변 국면이 대부분이라 '평소'가 부푼다(국면 오염, 비교용으로만 남김)
+        rt = r.tail(SD_WIN)
         sd = float((rt - rt.median()).abs().median() * 1.4826) or sd_raw
+        r250 = r.tail(250)
+        sd250 = float((r250 - r250.median()).abs().median() * 1.4826)
         v = vol[c].dropna()
         row = {"종목명": names[c], "종목코드": c, "섹터": sector.get(names[c], ""), "표본일수": len(p),
                "마지막일": p.index[-1].strftime("%Y-%m-%d"), "지금": p.iloc[-1], "일σ%": round(sd * 100, 2),
-               "일σ표준%": round(sd_raw * 100, 2)}
+               "일σ표준%": round(sd_raw * 100, 2), "일σ250%": round(sd250 * 100, 2)}
         fs = float_sh.get(c)
         row["회전%"] = round(float(v.tail(60).median()) / fs * 100, 3) if fs and fs == fs and fs > 0 else np.nan
         u = uni1.reindex(r.index).tail(250)
@@ -91,7 +96,11 @@ def main() -> int:
             row[f"r{n}%"] = round(now * 100, 2)
             row[f"z{n}"] = round(now / (sd * math.sqrt(n)), 2) if sd > 0 else np.nan
             row[f"분위{n}"] = round(float((hist < now).mean()), 2)
-            ur = (close / close.shift(n) - 1).iloc[-1]
+            uh = (close / close.shift(n) - 1)
+            ur = uh.iloc[-1]
+            # 시장(유니버스 평균)을 뺀 n일 수익률의 자기 분위. 오르는 장·빠지는 장의 바닥이 섞이는 국면 오염을 덜어 낸다
+            ex = (hist - uh.mean(axis=1).reindex(hist.index)).dropna()
+            row[f"초과분위{n}"] = round(float((ex < ex.iloc[-1]).mean()), 2) if len(ex) > 20 else np.nan
             row[f"초과{n}%p"] = round((now - float(ur.mean())) * 100, 2)
             peers = [x for x in close.columns if sector.get(names.get(x, ""), "") == row["섹터"] and x != c]
             row[f"섹터{n}%p"] = round((now - float(ur[peers].mean())) * 100, 2) if row["섹터"] and peers else np.nan
@@ -145,7 +154,7 @@ def main() -> int:
         # 외인 보유율
         f = fx[c].dropna()
         if len(f) > 60:
-            fsd = float(f.diff().dropna().tail(250).std())
+            fsd = float(f.diff().dropna().tail(SD_WIN).std())
             for n in (5, 20, 60):
                 dn = float(f.iloc[-1] - f.iloc[-1 - n])
                 row[f"f{n}%p"] = round(dn, 2)
