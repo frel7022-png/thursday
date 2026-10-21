@@ -22,6 +22,11 @@
 - 평지(창 10·20·40일): 밴드%(창 안 고−저 ÷ 평균) ÷ 일σ로 정규화한 값(평탄{w}, 작을수록 평평),
                        거래량배{w}(창 거래량 중간값 ÷ 창 직전 60일 중간값), 거래량2배일10(최근 10일 중 직전 60일 중간값 2배 이상인 날 수)
 - 외인: f{n}%p = n일 외국인소진율 변화, fz{n} = 그 변화 ÷ (외인 하루 변화 σ × √n)
+- 세 층 나누기(창 = 기준일 이후 '기준', 20일): 수익률 = 시장몫 + 섹터몫 + 자기몫 (2026-10-21, 대표와 유니버스 약점 이야기에서)
+  · 시장몫{w}%p = 베타120 × 유니버스 '중앙값' 수익률(평균은 한 섹터·몇 종목에 끌려간다)
+  · 섹터몫{w}%p = 비교군 종목들의 (수익률 − 자기 베타 × 중앙값)의 중앙값. 자기 자신은 뺀다
+  · 자기몫{w}%p = 나머지. 비교군 = 같은 섹터(자기 빼고 3개 이상, '기타' 칸 제외, 시장 뺀 평균 상관 0.2 이상)일 때 그 섹터, 아니면 최근 60일 시장 뺀 하루 수익률이 가장 닮은 10종목(닮은꼴)
+  · 베타120 = 최근 120거래일 유니버스 동일가중 대비(250일 베타는 국면 오염 비교용으로 그대로 둔다)
 판정은 하지 않는다. 숫자만 낸다. 거르고 판단하는 건 써스데이 몫(내_기준.md).
 """
 import math
@@ -34,6 +39,8 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent.parent
 NS = (1, 5, 20, 60, 120)
 WS = (10, 20, 40)
+BASE = "2026-08-19"  # 세 층 나누기의 긴 창 시작일(Fishing 누적 기준일). --base 로 바꾼다
+CORR_MIN = 0.2  # 이름표 섹터를 비교군으로 쓰는 최소 평균 상관(시장 뺀 60일). 이보다 낮으면 닮은꼴 10종목
 SD_WIN = 60  # '평소'를 재는 창(거래일). 국면이 바뀐 구간을 섞지 않으려고 최근만 쓴다(기억/셀/국면_오염.md)
 
 
@@ -56,6 +63,7 @@ def main() -> int:
             pass
     args = sys.argv[1:]
     out = Path(args[args.index("--out") + 1]) if "--out" in args else None
+    base = pd.Timestamp(args[args.index("--base") + 1] if "--base" in args else BASE)
     d, sh, sector = load()
 
     close = d.pivot(index="날짜", columns="종목코드", values="종가")
@@ -65,6 +73,25 @@ def main() -> int:
     ret1 = close.pct_change(fill_method=None)
     uni1 = ret1.mean(axis=1)                      # 유니버스 동일가중 하루 수익률
     float_sh = (sh.set_index("종목코드")["발행주식수"] * sh.set_index("종목코드")["유동주식비율"].fillna(100) / 100)
+
+    # 세 층 나누기 준비: 종목별 베타120, 시장 뺀 하루 수익률로 닮은꼴 10종목
+    r120 = ret1.tail(120)
+    u120 = uni1.tail(120)
+    beta120 = (r120.apply(lambda x: x.cov(u120)) / u120.var()).round(2)
+    resid = ret1.tail(SD_WIN).sub(uni1.tail(SD_WIN), axis=0)
+    corr = resid.corr(min_periods=40)
+    def look(c):
+        own = sector.get(names.get(c, ""), "")
+        same = [x for x in close.columns if x != c and own and sector.get(names.get(x, ""), "") == own]
+        # 이름표 섹터는 실제로 같이 움직일 때만 쓴다. '기타'는 모아 둔 칸이고, 현대백화점(레저)처럼 이름표가 실제 무리와 다를 수 있다
+        fit = float(corr.loc[c, same].mean()) if same and c in corr else np.nan
+        if len(same) >= 3 and not own.startswith("기타") and fit >= CORR_MIN:
+            return same, f"섹터:{own}", round(fit, 2)
+        sim = corr[c].drop(c).dropna().sort_values(ascending=False).head(10).index.tolist() if c in corr else []
+        return sim, "닮은꼴:" + "·".join(names[x] for x in sim[:3]), round(float(corr.loc[c, sim].mean()), 2) if sim else np.nan
+    i0 = close.index[close.index >= base]
+    wins = {"기준": close.index.get_loc(i0[0]) - 1 if len(i0) else None, "20": len(close) - 21}
+    wret = {w: (close.iloc[-1] / close.iloc[k] - 1) for w, k in wins.items() if k is not None and k >= 0}
 
     rows = []
     for c in close.columns:
@@ -151,6 +178,21 @@ def main() -> int:
         if len(v) >= 70:
             base = v.iloc[-70:-10].median()
             row["거래량2배일10"] = int((v.tail(10) >= 2 * base).sum()) if base > 0 else np.nan
+        # 세 층: 시장몫 · 섹터몫 · 자기몫 (단순 수익률 기준 덧셈 근사)
+        grp, label, fit = look(c)
+        row["비교군"] = label
+        row["비교군상관"] = fit  # 낮으면(0.2 안팎) 닮은꼴도 우연일 수 있어 섹터몫을 믿지 않는다
+        row["베타120"] = float(beta120.get(c, np.nan))
+        for w, wr in wret.items():
+            if pd.isna(wr.get(c)):
+                continue
+            med = float(wr.median())
+            mkt = row["베타120"] * med
+            g = [(wr[x] - beta120.get(x, np.nan) * med) for x in grp if pd.notna(wr.get(x)) and pd.notna(beta120.get(x))]
+            sec_part = float(np.median(g)) if len(g) >= 3 else 0.0
+            row[f"시장몫{w}%p"] = round(mkt * 100, 2)
+            row[f"섹터몫{w}%p"] = round(sec_part * 100, 2)
+            row[f"자기몫{w}%p"] = round((float(wr[c]) - mkt - sec_part) * 100, 2)
         # 외인 보유율
         f = fx[c].dropna()
         if len(f) > 60:
