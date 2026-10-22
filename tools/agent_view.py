@@ -205,7 +205,13 @@ def take_numbers(b: Book) -> dict:
            "day_won": b.total - prev_total, "day_pct": (b.total / prev_total - 1) * 100 if prev_total else 0.0,
            "realized_today": float(pd.to_numeric(t.loc[t["구분"] == "매도", "실현손익"], errors="coerce").sum()),
            "stock_day": None, "ex_day": None, "main_day": None, "basis": b.basis, "today": b.today, "closed": b.closed,
-           "start": None, "bench_cum": None}
+           "start": None, "bench_cum": None,
+           "acct_cost": float((b.h["수량"] * b.h["평단가"]).sum()) if not b.h.empty else 0.0}
+    out["acct_pct"] = (b.stock_val / out["acct_cost"] - 1) * 100 if out["acct_cost"] else None  # 총계좌(대표 10-22)
+    # 총계좌 어제 대비: 같은 원 변화를 1억이 아니라 굴린 돈(어제 종가 보유 평가 + 오늘 매수 금액)으로 나눔. 현금 희석 없이 혼합지수와 비교하려고(대표 10-22)
+    buys = t[t["구분"] == "매수"]
+    acct_base = prev_val + float((pd.to_numeric(buys["수량"]) * pd.to_numeric(buys["단가"])).sum())
+    out["acct_day_pct"] = out["day_won"] / acct_base * 100 if acct_base else None
     if not b.h.empty and b.stock_val:
         prev_sv = float((b.h["평가금액"] / (1 + b.h["등락률"] / 100)).sum())
         out["stock_day"] = (b.stock_val / prev_sv - 1) * 100 if prev_sv else None
@@ -244,6 +250,11 @@ def cmd_take(b: Book, header=True):
     realized = pd.to_numeric(t.loc[t["구분"] == "매도", "실현손익"], errors="coerce").sum()
     _out(f"총자산 {b.total:,.0f}원 · 원금 대비 {b.total - b.initial:+,.0f}원 ({pct((b.total / b.initial - 1) * 100)})")
     _out(f"예수금 {b.cash:,.0f}원 ({b.cash / b.total * 100:.1f}%) · 총평가 {b.stock_val:,.0f}원 · 보유 {len(b.h)}종목")
+    # 총계좌 = 굴리는 돈(보유 매입 합) 기준. 성적은 총자산·총계좌 두 가지로 본다(대표 2026-10-22)
+    cost = float((b.h["수량"] * b.h["평단가"]).sum()) if not b.h.empty else 0.0
+    if cost:
+        _out(f"총계좌 매입 {cost:,.0f}원 → 평가 {b.stock_val:,.0f}원 · 평가손익 {b.stock_val - cost:+,.0f}원 ({pct((b.stock_val / cost - 1) * 100)})"
+             f" · 누적 실현손익 {pd.to_numeric(tx.loc[tx['구분'] == '매도', '실현손익'], errors='coerce').sum():+,.0f}원")
     _out(f"어제 대비 {b.total - prev_total:+,.0f}원 ({pct((b.total / prev_total - 1) * 100)}) · 오늘 실현손익 {realized:+,.0f}원")
     try:
         s = _index_frames(b)

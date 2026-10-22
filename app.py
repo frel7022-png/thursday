@@ -1,6 +1,6 @@
 """써스데이 모니터링 앱 — 대표가 써스데이 계좌를 지켜보는 화면 (2026-10-15 새러데이 작성).
 
-구성(1712·1718 합의): 타이틀(총자산·원금 대비·어제 대비·예수금) + Today's Take + Holdings.
+구성(1712·1718 합의): 타이틀(총자산·원금 대비·어제 대비·예수금·총계좌 — 2026-10-22 대표) + Today's Take + Holdings.
 분석 탭(Fishing·Link·Basecamp·Foreigner·DC/UC 등)은 넣지 않는다 — 분석은 새러데이 리포트 몫.
 계산은 tools/agent_view.py와 같은 함수(new1 portfolio_core를 import). 장부는 이 레포의 ledger/를 읽는다.
 
@@ -89,9 +89,12 @@ st.markdown(
     f'<div class="tw-main">{take["total"]:,.0f}원</div>'
     f'<div class="tw-grid">'
     f'<div>원금 대비<b style="color:{color(gain)}">{signed(gain, won=True)} ({signed(gain / take["initial"] * 100)})</b></div>'
-    f'<div>어제 대비<b style="color:{color(take["day_won"])}">{signed(take["day_won"], won=True)} ({signed(take["day_pct"])})</b></div>'
+    f'<div>어제 대비(총자산·총계좌)<b style="color:{color(take["day_won"])}">{signed(take["day_won"], won=True)} '
+    f'({signed(take["day_pct"])} · {signed(take.get("acct_day_pct"))})</b></div>'
     f'<div>예수금<b>{take["cash"]:,.0f}원 ({take["cash"] / take["total"] * 100:.1f}%)</b></div>'
     f'<div>총평가<b>{take["stock_val"]:,.0f}원</b></div>'
+    f'<div>총계좌(매입 {take["acct_cost"]:,.0f}원)<b style="color:{color(take["acct_pct"])}">'
+    f'{signed(take["stock_val"] - take["acct_cost"], won=True)} ({signed(take["acct_pct"])})</b></div>'
     f'<div>{(take["today"][5:] + " ") if take.get("closed") else "오늘 "}실현손익<b style="color:{color(take["realized_today"])}">{signed(take["realized_today"], won=True)}</b></div>'
     f'<div>보유<b>{take["n"]}종목</b></div>'
     f'</div></div>', unsafe_allow_html=True)
@@ -99,6 +102,8 @@ st.markdown(
 # ---- Today's Take
 ex_day, my_day = take.get("ex_day"), take.get("stock_day")
 gap = (my_day - ex_day) if (my_day is not None and ex_day is not None) else None
+acct_day = take.get("acct_day_pct")
+gap2 = (acct_day - ex_day) if (acct_day is not None and ex_day is not None) else None
 cum_line = ""
 if take.get("start") and take.get("bench_cum") is not None:
     acct_cum = gain / take["initial"] * 100
@@ -107,8 +112,10 @@ if take.get("start") and take.get("bench_cum") is not None:
 st.markdown(
     f'<div class="tw-box tw-take"><div class="tw-label" style="font-weight:600;color:#191b21">Today\'s Take</div>'
     f'<div>{("[" + take["basis"] + "] ") if take.get("closed") else ""}혼합지수(삼성·하이닉스 제외) <b style="color:{color(ex_day)}">{signed(ex_day)}</b></div>'
-    f'<div>내 지수 <b style="color:{color(my_day)}">{signed(my_day)}</b></div>'
-    f'<div>혼합지수 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>{cum_line}</div>',
+    f'<div>내 지수(지금 보유를 어제 종가부터 들었다면) <b style="color:{color(my_day)}">{signed(my_day)}</b>'
+    f' · 혼합지수 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>'
+    f'<div>총계좌 어제 대비(실제 체결가 반영) <b style="color:{color(acct_day)}">{signed(acct_day)}</b>'
+    f' · 혼합지수 대비 <b style="color:{color(gap2)}">{signed(gap2, unit="%p")}</b></div>{cum_line}</div>',
     unsafe_allow_html=True)
 
 # ---- Holdings
@@ -120,11 +127,12 @@ else:
     for _, r in hold.sort_values("평가금액", ascending=False).iterrows():
         cls = "tw-card green" if r["녹색"] else "tw-card"
         w = r["평가금액"] / take["total"] * 100
+        wa = r["평가금액"] / take["stock_val"] * 100 if take["stock_val"] else 0.0  # 총계좌 안 무게(대표 2026-10-22)
         st.markdown(
             f'<div class="{cls}"><span class="nm">{r["종목명"]}</span><span class="sec">{r["섹터"]} · {r["매수횟수"]}회 매수</span>'
             f'<div class="row">'
             f'<div>현재가<b>{r["현재가"]:,.0f} <span style="color:{color(r["등락률"])};font-size:11px">{signed(r["등락률"])}</span></b></div>'
             f'<div>평단<b>{r["평단가"]:,.0f}</b></div>'
             f'<div>손익<b style="color:{color(r["손익"])}">{signed(r["손익률"])} ({signed(r["손익"], won=True)})</b></div>'
-            f'<div>수량·비중<b>{r["수량"]:g}주 · {w:.2f}%</b></div>'
+            f'<div>수량·비중(총자산·총계좌)<b>{r["수량"]:g}주 · {w:.2f}% · {wa:.1f}%</b></div>'
             f'</div></div>', unsafe_allow_html=True)
