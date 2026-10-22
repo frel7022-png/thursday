@@ -212,6 +212,26 @@ def take_numbers(b: Book) -> dict:
     buys = t[t["구분"] == "매수"]
     acct_base = prev_val + float((pd.to_numeric(buys["수량"]) * pd.to_numeric(buys["단가"])).sum())
     out["acct_day_pct"] = out["day_won"] / acct_base * 100 if acct_base else None
+    # 당일·전일 산 것이 잘 골랐나(대표 10-22): 그날 매수분만 모아 체결가→지금, 그리고 오늘 하루(어제 종가→지금) 움직임
+    def _buys(day):
+        g = tx[(tx["날짜"] == day) & (tx["구분"] == "매수")]
+        if g.empty:
+            return None
+        cost = now = prev = 0.0
+        for _, r in g.iterrows():
+            q = b.quotes.get(b.n2c.get(r["종목명"], "")) or {}
+            px = float(q.get("price") or 0)
+            if not px:
+                continue
+            n = float(r["수량"])
+            cost += n * float(r["단가"])
+            now += n * px
+            prev += n * px / (1 + float(q.get("change_pct") or 0) / 100)
+        return {"day": day, "n": len(g), "cost": cost, "since_buy": (now / cost - 1) * 100 if cost else None,
+                "today": (now / prev - 1) * 100 if prev else None}
+    earlier = tx.loc[tx["날짜"] < b.today, "날짜"]
+    out["buys_today"] = _buys(b.today)
+    out["buys_prev"] = _buys(earlier.max()) if not earlier.empty else None
     if not b.h.empty and b.stock_val:
         prev_sv = float((b.h["평가금액"] / (1 + b.h["등락률"] / 100)).sum())
         out["stock_day"] = (b.stock_val / prev_sv - 1) * 100 if prev_sv else None

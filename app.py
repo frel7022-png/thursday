@@ -109,13 +109,25 @@ if take.get("start") and take.get("bench_cum") is not None:
     acct_cum = gain / take["initial"] * 100
     cum_line = (f'<div>시작일({take["start"]}) 이후 누적 · 써스데이 <b style="color:{color(acct_cum)}">{signed(acct_cum)}</b>'
                 f' · 혼합지수 <b style="color:{color(take["bench_cum"])}">{signed(take["bench_cum"])}</b></div>')
+# 당일: 오늘 산 것은 체결가→지금, 전일 산 것은 오늘 하루(어제 종가→지금)를 혼합지수 당일과 같은 눈금으로 댄다(대표 10-22)
+day_line = (f'<div>당일 · 총계좌(실제 체결가 반영) <b style="color:{color(acct_day)}">{signed(acct_day)}</b>'
+            f' · 혼합지수 <b style="color:{color(ex_day)}">{signed(ex_day)}</b>'
+            f' · 대비 <b style="color:{color(gap2)}">{signed(gap2, unit="%p")}</b></div>')
+for key, lab in (("buys_today", "오늘 산 것"), ("buys_prev", "전일 산 것")):
+    g = take.get(key)
+    if not g:
+        continue
+    rel = (g["today"] - ex_day) if (g["today"] is not None and ex_day is not None) else None
+    day_line += (f'<div style="padding-left:10px">{lab}({g["day"][5:]}, {g["n"]}건 {g["cost"]:,.0f}원) · 체결가 대비 '
+                 f'<b style="color:{color(g["since_buy"])}">{signed(g["since_buy"])}</b>'
+                 f' · 오늘 하루 <b style="color:{color(g["today"])}">{signed(g["today"])}</b>'
+                 f' · 혼합지수 대비 <b style="color:{color(rel)}">{signed(rel, unit="%p")}</b></div>')
 st.markdown(
     f'<div class="tw-box tw-take"><div class="tw-label" style="font-weight:600;color:#191b21">Today\'s Take</div>'
     f'<div>{("[" + take["basis"] + "] ") if take.get("closed") else ""}혼합지수(삼성·하이닉스 제외) <b style="color:{color(ex_day)}">{signed(ex_day)}</b></div>'
     f'<div>내 지수(지금 보유를 어제 종가부터 들었다면) <b style="color:{color(my_day)}">{signed(my_day)}</b>'
     f' · 혼합지수 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>'
-    f'<div>총계좌 어제 대비(실제 체결가 반영) <b style="color:{color(acct_day)}">{signed(acct_day)}</b>'
-    f' · 혼합지수 대비 <b style="color:{color(gap2)}">{signed(gap2, unit="%p")}</b></div>{cum_line}</div>',
+    f'{cum_line}{day_line}</div>',
     unsafe_allow_html=True)
 
 # ---- Holdings
