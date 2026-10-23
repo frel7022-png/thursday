@@ -58,7 +58,7 @@ def signed(v, unit="%", d=2, won=False):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load(ledger_mtime: float):
+def load(ledger_mtime: float, code_mtime: float):  # code_mtime: 계산 코드가 바뀌면 캐시된 옛 결과(새 키 없음)를 버린다
     b = av.Book(LEDGER)
     take = av.take_numbers(b)
     rows = []
@@ -77,7 +77,8 @@ top_l, top_r = st.columns([4, 1], vertical_alignment="center")
 with top_r:
     if st.button("새로고침", use_container_width=True):
         load.clear()
-take, hold, asof, last = load(LEDGER.stat().st_mtime if LEDGER.exists() else 0.0)
+_code = Path(av.__file__).stat().st_mtime + Path(__file__).stat().st_mtime
+take, hold, asof, last = load(LEDGER.stat().st_mtime if LEDGER.exists() else 0.0, _code)
 with top_l:
     st.markdown(f'<p class="tw-sub">{asof} {take.get("basis", "")} · 장부 마지막 거래 {last or "없음"} · 원금 {take["initial"]:,.0f}원</p>',
                 unsafe_allow_html=True)
@@ -93,8 +94,9 @@ st.markdown(
     f'({signed(take["day_pct"])} · {signed(take.get("acct_day_pct"))})</b></div>'
     f'<div>예수금<b>{take["cash"]:,.0f}원 ({take["cash"] / take["total"] * 100:.1f}%)</b></div>'
     f'<div>총평가<b>{take["stock_val"]:,.0f}원</b></div>'
-    f'<div>총계좌(매입 {take["acct_cost"]:,.0f}원)<b style="color:{color(take["acct_pct"])}">'
-    f'{signed(take["stock_val"] - take["acct_cost"], won=True)} ({signed(take["acct_pct"])})</b></div>'
+    + (f'<div>총계좌(매입 {take["acct_cost"]:,.0f}원)<b style="color:{color(take.get("acct_pct"))}">'
+       f'{signed(take["stock_val"] - take["acct_cost"], won=True)} ({signed(take.get("acct_pct"))})</b></div>'
+       if take.get("acct_cost") else "") +
     f'<div>{(take["today"][5:] + " ") if take.get("closed") else "오늘 "}실현손익<b style="color:{color(take["realized_today"])}">{signed(take["realized_today"], won=True)}</b></div>'
     f'<div>보유<b>{take["n"]}종목</b></div>'
     f'</div></div>', unsafe_allow_html=True)
