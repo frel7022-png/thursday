@@ -102,7 +102,7 @@ st.markdown(
     f'</div></div>', unsafe_allow_html=True)
 
 # ---- Today's Take (대표 2026-10-23 정리): 혼합지수 당일 / 누적·당일 = 써스데이 총계좌(내 주식) vs 혼합지수, 대비 + 빨강 · − 파랑.
-# 총계좌 누적은 ledger/stock_history.csv(하루 수익률 이어 붙임, 16:30 report가 저장)에 오늘 실시간을 곱한다. 새로고침 = 그 시각 기준.
+# 누적 = 매입 대비 평가손익(+실현), 당일 = 오늘 손익 ÷ (어제 종가 평가 + 오늘 매수금). 새로고침 = 그 시각 기준(대표 10-23).
 ex_day = take.get("ex_day")
 
 
@@ -113,7 +113,7 @@ def vs_line(label, mine, bench):
             f' · 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>')
 
 
-cum_line = (vs_line(f'시작일({take["start"]}) 이후 누적', take.get("acct_cum_pct"), take.get("bench_cum"))
+cum_line = (vs_line(f'시작일({take["start"]}) 이후 누적', take.get("acct_pct"), take.get("bench_cum"))
             if take.get("start") and take.get("bench_cum") is not None else "")
 st.markdown(
     f'<div class="tw-box tw-take"><div class="tw-label" style="font-weight:600;color:#191b21">Today&#39;s Take</div>'

@@ -207,7 +207,9 @@ def take_numbers(b: Book) -> dict:
            "stock_day": None, "ex_day": None, "main_day": None, "basis": b.basis, "today": b.today, "closed": b.closed,
            "start": None, "bench_cum": None,
            "acct_cost": float((b.h["수량"] * b.h["평단가"]).sum()) if not b.h.empty else 0.0}
-    out["acct_pct"] = (b.stock_val / out["acct_cost"] - 1) * 100 if out["acct_cost"] else None  # 총계좌(대표 10-22)
+    # 총계좌 = 매입 대비 평가손익(대표 10-23: "1000만원 사서 −100만원이면 −10%"). 판 게 생기면 누적 실현손익을 손익에 더한다
+    _real = float(pd.to_numeric(tx.loc[tx["구분"] == "매도", "실현손익"], errors="coerce").sum())
+    out["acct_pct"] = ((b.stock_val - out["acct_cost"] + _real) / out["acct_cost"] * 100) if out["acct_cost"] else None
     # 총계좌 어제 대비: 같은 원 변화를 1억이 아니라 굴린 돈(어제 종가 보유 평가 + 오늘 매수 금액)으로 나눔. 현금 희석 없이 혼합지수와 비교하려고(대표 10-22)
     buys = t[t["구분"] == "매수"]
     acct_base = prev_val + float((pd.to_numeric(buys["수량"]) * pd.to_numeric(buys["단가"])).sum())
