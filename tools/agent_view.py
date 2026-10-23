@@ -212,6 +212,13 @@ def take_numbers(b: Book) -> dict:
     buys = t[t["구분"] == "매수"]
     acct_base = prev_val + float((pd.to_numeric(buys["수량"]) * pd.to_numeric(buys["단가"])).sum())
     out["acct_day_pct"] = out["day_won"] / acct_base * 100 if acct_base else None
+    out["acct_cum_pct"] = out["acct_hist_last"] = None
+    if STOCK_HIST.exists():
+        hist = pd.read_csv(STOCK_HIST, encoding="utf-8-sig", dtype={"날짜": str})
+        hist = hist[hist["날짜"] < str(b.today)]
+        cum = float((1 + hist["당일%"] / 100).prod())
+        out["acct_hist_last"] = hist["날짜"].max() if not hist.empty else None
+        out["acct_cum_pct"] = (cum * (1 + (out["acct_day_pct"] or 0) / 100) - 1) * 100
     # 당일·전일 산 것이 잘 골랐나(대표 10-22): 그날 매수분만 모아 체결가→지금, 그리고 오늘 하루(어제 종가→지금) 움직임
     def _buys(day):
         g = tx[(tx["날짜"] == day) & (tx["구분"] == "매수")]
@@ -336,8 +343,60 @@ def cmd_report(b: Book, data):
     for _, r in closed.iterrows():
         _out(f"{r['종목명']} (전부 매도) 재진입 참고 = 매도가 {float(r['매도가']):,.0f} −5% → {float(r['매도가']) * (1 + REENTRY):,.0f}")
     if data is not None:
+        if b.closed:
+            save_stock_history(b, data["ph"])  # 총계좌 누적용 일별 기록(앱 Today's Take가 읽음)
         _out()
         _out(f"외인·거래량 DB 최신일 {data['fh']['날짜'].max()} (오늘 외인은 16:13 적재 이후 들어옴)")
+
+
+# ------------------------------------------------------------------ 총계좌 일별 기록
+STOCK_HIST = HERE / "ledger" / "stock_history.csv"
+
+
+def stock_history_rows(b: Book, ph: pd.DataFrame) -> pd.DataFrame:
+    """총계좌(내 주식) 하루 수익률 = (그날 종가 평가 − 전날 종가 평가 − 그날 매수금 + 그날 매도 순수령) ÷ (전날 종가 평가 + 그날 매수금).
+    이어 붙이면 굴린 돈이 매일 늘어도 혼합지수와 같은 눈금(시간가중)이 된다(대표 2026-10-23: 누적은 계좌여야 함, 자산이면 안 됨).
+    ph = 종목코드·날짜·종가(link.load_data()["ph"]). 장 마감 뒤엔 오늘 행을 실시간 현재가(= 15:30 종가)로 붙인다."""
+    tx = b.tx.copy()
+    if tx.empty:
+        return pd.DataFrame()
+    tx["코드"] = [b.n2c.get(n, "") for n in tx["종목명"]]
+    tx["금액"] = pd.to_numeric(tx["수량"]) * pd.to_numeric(tx["단가"])
+    px = ph.pivot_table(index="날짜", columns="종목코드", values="종가", aggfunc="last")
+    px.index = px.index.astype(str)
+    if b.closed:
+        px.loc[str(b.today)] = pd.Series({c: float(q.get("price") or 0) or None for c, q in b.quotes.items()})
+    days = [d for d in px.index if d >= tx["날짜"].min() and d <= str(b.today) and (d < str(b.today) or b.closed)]
+    rows, qty, prev_v = [], {}, 0.0
+    for d in days:
+        t = tx[tx["날짜"] == d]
+        for _, r in t.iterrows():
+            qty[r["코드"]] = qty.get(r["코드"], 0.0) + (float(r["수량"]) if r["구분"] == "매수" else -float(r["수량"]))
+        v = sum(n * float(px.at[d, c]) for c, n in qty.items() if n and c in px.columns and pd.notna(px.at[d, c]))
+        buy = float(t.loc[t["구분"] == "매수", "금액"].sum())
+        sell = float(t.loc[t["구분"] == "매도", "금액"].sum()) * (1 - b.fee)
+        base = prev_v + buy
+        rows.append({"날짜": d, "주식평가": round(v), "매수금액": round(buy), "매도순수령": round(sell),
+                     "당일%": round((v - prev_v - buy + sell) / base * 100, 4) if base else 0.0})
+        prev_v = v
+    return pd.DataFrame(rows)
+
+
+def save_stock_history(b: Book, ph: pd.DataFrame):
+    h = stock_history_rows(b, ph)
+    if not h.empty:
+        h.to_csv(STOCK_HIST, index=False, encoding="utf-8-sig")
+    return h
+
+
+def cmd_stockhist(b: Book, data):
+    b.header()
+    h = save_stock_history(b, data["ph"])
+    cum = 1.0
+    for _, r in h.iterrows():
+        cum *= 1 + r["당일%"] / 100
+        _out(f"{r['날짜']} 주식평가 {r['주식평가']:,.0f} · 매수 {r['매수금액']:,.0f} · 매도 {r['매도순수령']:,.0f} · 당일 {r['당일%']:+.2f}% · 누적 {(cum - 1) * 100:+.2f}%")
+    _out(f"저장: {STOCK_HIST}")
 
 
 # ------------------------------------------------------------------ 공통 원자료
@@ -517,7 +576,7 @@ def main() -> int:
         _out(__doc__)
         return 1
     cmd, rest = args[0], args[1:]
-    need_data = cmd in ("flow", "series", "report", "updown", "screen")
+    need_data = cmd in ("flow", "series", "report", "updown", "screen", "stockhist")
     data = None
     if need_data:
         import daily_link_report as link
@@ -550,6 +609,8 @@ def main() -> int:
         cmd_cap(b)
     elif cmd == "report":
         cmd_report(b, data)
+    elif cmd == "stockhist":
+        cmd_stockhist(b, data)
     else:
         _out(__doc__)
         return 1

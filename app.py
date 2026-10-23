@@ -101,35 +101,24 @@ st.markdown(
     f'<div>보유<b>{take["n"]}종목</b></div>'
     f'</div></div>', unsafe_allow_html=True)
 
-# ---- Today's Take
-ex_day, my_day = take.get("ex_day"), take.get("stock_day")
-gap = (my_day - ex_day) if (my_day is not None and ex_day is not None) else None
-acct_day = take.get("acct_day_pct")
-gap2 = (acct_day - ex_day) if (acct_day is not None and ex_day is not None) else None
-cum_line = ""
-if take.get("start") and take.get("bench_cum") is not None:
-    acct_cum = gain / take["initial"] * 100
-    cum_line = (f'<div>시작일({take["start"]}) 이후 누적 · 써스데이 <b style="color:{color(acct_cum)}">{signed(acct_cum)}</b>'
-                f' · 혼합지수 <b style="color:{color(take["bench_cum"])}">{signed(take["bench_cum"])}</b></div>')
-# 당일: 오늘 산 것은 체결가→지금, 전일 산 것은 오늘 하루(어제 종가→지금)를 혼합지수 당일과 같은 눈금으로 댄다(대표 10-22)
-day_line = (f'<div>당일 · 총계좌(실제 체결가 반영) <b style="color:{color(acct_day)}">{signed(acct_day)}</b>'
-            f' · 혼합지수 <b style="color:{color(ex_day)}">{signed(ex_day)}</b>'
-            f' · 대비 <b style="color:{color(gap2)}">{signed(gap2, unit="%p")}</b></div>')
-for key, lab in (("buys_today", "오늘 산 것"), ("buys_prev", "전일 산 것")):
-    g = take.get(key)
-    if not g:
-        continue
-    rel = (g["today"] - ex_day) if (g["today"] is not None and ex_day is not None) else None
-    day_line += (f'<div style="padding-left:10px">{lab}({g["day"][5:]}, {g["n"]}건 {g["cost"]:,.0f}원) · 체결가 대비 '
-                 f'<b style="color:{color(g["since_buy"])}">{signed(g["since_buy"])}</b>'
-                 f' · 오늘 하루 <b style="color:{color(g["today"])}">{signed(g["today"])}</b>'
-                 f' · 혼합지수 대비 <b style="color:{color(rel)}">{signed(rel, unit="%p")}</b></div>')
+# ---- Today's Take (대표 2026-10-23 정리): 혼합지수 당일 / 누적·당일 = 써스데이 총계좌(내 주식) vs 혼합지수, 대비 + 빨강 · − 파랑.
+# 총계좌 누적은 ledger/stock_history.csv(하루 수익률 이어 붙임, 16:30 report가 저장)에 오늘 실시간을 곱한다. 새로고침 = 그 시각 기준.
+ex_day = take.get("ex_day")
+
+
+def vs_line(label, mine, bench):
+    gap = (mine - bench) if (mine is not None and bench is not None) else None
+    return (f'<div>{label} · 써스데이 <b style="color:{color(mine)}">{signed(mine)}</b>'
+            f' · 혼합지수 <b style="color:{color(bench)}">{signed(bench)}</b>'
+            f' · 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>')
+
+
+cum_line = (vs_line(f'시작일({take["start"]}) 이후 누적', take.get("acct_cum_pct"), take.get("bench_cum"))
+            if take.get("start") and take.get("bench_cum") is not None else "")
 st.markdown(
-    f'<div class="tw-box tw-take"><div class="tw-label" style="font-weight:600;color:#191b21">Today\'s Take</div>'
+    f'<div class="tw-box tw-take"><div class="tw-label" style="font-weight:600;color:#191b21">Today&#39;s Take</div>'
     f'<div>{("[" + take["basis"] + "] ") if take.get("closed") else ""}혼합지수(삼성·하이닉스 제외) <b style="color:{color(ex_day)}">{signed(ex_day)}</b></div>'
-    f'<div>내 지수(지금 보유를 어제 종가부터 들었다면) <b style="color:{color(my_day)}">{signed(my_day)}</b>'
-    f' · 혼합지수 대비 <b style="color:{color(gap)}">{signed(gap, unit="%p")}</b></div>'
-    f'{cum_line}{day_line}</div>',
+    f'{cum_line}{vs_line("당일", take.get("acct_day_pct"), ex_day)}</div>',
     unsafe_allow_html=True)
 
 # ---- Holdings
