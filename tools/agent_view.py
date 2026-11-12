@@ -417,9 +417,15 @@ def _window(df, code, start):
 
 
 def _uni_avg(ph, live, start, before):
-    """같은 구간 관심종목 평균 수익률(%)과 종목 수. before=True면 시작일 직전 종가가 기준."""
-    base = ph[ph["날짜"] < start].sort_values("날짜").groupby("종목코드").last()["종가"] if before else \
-        ph[ph["날짜"] >= start].sort_values("날짜").groupby("종목코드").first()["종가"]
+    """같은 구간 관심종목 평균 수익률(%)과 종목 수. before=True면 시작일 직전 종가가 기준.
+    직전 종가가 없는 종목(시세가 시작일 이후부터 있는 종목)은 시작일 이후 첫 종가로 채워 평균에 넣는다
+    (2026-11-05 대표 승인: 전에는 직전 종가가 있는 종목만 넣어 08-19 시작이면 181개 중 8개 평균이 됐다)."""
+    after = ph[ph["날짜"] >= start].sort_values("날짜").groupby("종목코드").first()["종가"]
+    if before:
+        pre = ph[ph["날짜"] < start].sort_values("날짜").groupby("종목코드").last()["종가"]
+        base = pre.combine_first(after)
+    else:
+        base = after
     uni = [(live[c] / float(v) - 1) * 100 for c, v in base.items() if live.get(c) and float(v) > 0]
     return (sum(uni) / len(uni) if uni else float("nan")), len(uni)
 
